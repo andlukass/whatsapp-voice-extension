@@ -1,3 +1,7 @@
+interface Window {
+  __voiceFileInstalled?: boolean;
+}
+
 (() => {
   "use strict";
   if (window.__voiceFileInstalled) return;
@@ -8,23 +12,35 @@
   const originalGetUserMedia = devices.getUserMedia;
   const MIC = ["ptt", "mic", "microphone", "ic-mic"];
   const PAUSE = ["pause", "audio-pause", "ptt-pause", "ic-pause", "ic-pause-filled"];
-  let session = null;
-  let noticeTimer;
+  interface Session {
+    chat: string;
+    context: AudioContext;
+    armed: boolean;
+    closed: boolean;
+    captured?: boolean;
+    destination?: MediaStreamAudioDestinationNode;
+    source?: AudioBufferSourceNode;
+    stream?: MediaStream;
+    monitor?: number;
+  }
+
+  let session: Session | null = null;
+  let noticeTimer: number | undefined;
   let queued = false;
 
-  const currentChat = () => document.querySelector("#main header")?.innerText.split("\n")[0];
+  const currentChat = () => document.querySelector<HTMLElement>("#main header")?.innerText.split("\n")[0];
 
-  function control(icons) {
-    const matches = new Set();
+  function control(icons: string[]): HTMLElement | null {
+    const matches = new Set<HTMLElement>();
     for (const element of document.querySelectorAll("#main footer [data-icon], #main footer svg title")) {
-      if (!icons.includes(element.getAttribute("data-icon") ?? element.textContent)) continue;
-      const button = element.closest("button, [role='button']");
+      if (!icons.includes(element.getAttribute("data-icon") ?? element.textContent ?? "")) continue;
+      const button = element.closest<HTMLElement>("button, [role='button']");
       if (button?.getClientRects().length && button.id !== ID) matches.add(button);
     }
     return matches.size === 1 ? [...matches][0] : null;
   }
 
-  function notify(message, error = false) {
+  function notify(message: string, error = false) {
     let notice = document.getElementById(`${ID}-notice`);
     if (!notice) {
       notice = document.createElement("div");
@@ -39,7 +55,7 @@
     noticeTimer = setTimeout(() => notice.remove(), error ? 12000 : 6500);
   }
 
-  function release(active) {
+  function release(active: Session | null) {
     if (!active || active.closed) return;
     active.closed = true;
     active.armed = false;
@@ -52,13 +68,13 @@
     active.destination?.stream.getTracks().forEach((track) => track.stop());
     void active.context.close().catch(() => {});
     if (session === active) session = null;
-    const button = document.getElementById(ID);
+    const button = document.querySelector<HTMLButtonElement>(`#${ID}`);
     if (button) button.disabled = false;
   }
 
   devices.getUserMedia = async function (constraints) {
     const active = session;
-    if (!active?.armed || !constraints?.audio || constraints.video) {
+    if (!active?.armed || !active.destination || !constraints?.audio || constraints.video) {
       return originalGetUserMedia.call(this, constraints);
     }
     active.armed = false;
@@ -68,7 +84,7 @@
     return active.stream;
   };
 
-  async function record(file, active) {
+  async function record(file: File, active: Session) {
     try {
       if (!file.size || file.size > 100 * 1024 * 1024) throw new Error("Choose a non-empty audio file smaller than 100 MB.");
       notify("Preparing voice message…");
@@ -109,7 +125,7 @@
       active.armed = false;
       if (currentChat() === active.chat && control(PAUSE)) control(["ic-delete", "delete", "ptt-delete"])?.click();
       release(active);
-      notify(error.message || "Could not prepare this audio file.", true);
+      notify(error instanceof Error ? error.message || "Could not prepare this audio file." : "Could not prepare this audio file.", true);
     }
   }
 
@@ -117,9 +133,10 @@
     if (session) return;
     const chat = currentChat();
     if (!chat || !control(MIC)) return;
-    const active = { chat, context: new AudioContext(), armed: false, closed: false };
+    const active: Session = { chat, context: new AudioContext(), armed: false, closed: false };
     session = active;
-    document.getElementById(ID).disabled = true;
+    const button = document.querySelector<HTMLButtonElement>(`#${ID}`);
+    if (button) button.disabled = true;
     // Resume during the real button click, before the file picker consumes activation.
     void active.context.resume().catch(() => release(active));
     const input = document.createElement("input");
@@ -165,8 +182,8 @@
     });
     let anchor = microphone;
     // WhatsApp currently wraps the real microphone in another button.
-    while (anchor.parentElement?.closest("button")) anchor = anchor.parentElement.closest("button");
-    anchor.parentElement.classList.add(`${ID}-controls`);
+    while (anchor.parentElement?.closest("button")) anchor = anchor.parentElement.closest("button")!;
+    anchor.parentElement?.classList.add(`${ID}-controls`);
     anchor.before(button);
   }
 

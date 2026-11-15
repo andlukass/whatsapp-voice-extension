@@ -1,19 +1,21 @@
+const { test, mock } = require("node:test");
+const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
 
 function install() {
-  const original = jest.fn().mockResolvedValue("real-microphone");
+  const original = mock.fn(async () => "real-microphone");
   const navigator = { mediaDevices: { getUserMedia: original } };
-  const window = { addEventListener: jest.fn() };
+  const window = { addEventListener: mock.fn() };
   const document = { documentElement: {}, querySelectorAll: () => [] };
-  const observe = jest.fn();
+  const observe = mock.fn();
   const environment = {
     window, navigator, document,
     MutationObserver: class { observe = observe; },
-    requestAnimationFrame: jest.fn(),
+    requestAnimationFrame: mock.fn(),
   };
-  const source = readFileSync(join(__dirname, "content.js"), "utf8");
+  const source = readFileSync(join(__dirname, "dist/content.js"), "utf8");
   vm.runInNewContext(source, environment);
   return { environment, navigator, original, observe, source };
 }
@@ -21,23 +23,31 @@ function install() {
 test("normal microphone requests keep the original behavior", async () => {
   const { navigator, original } = install();
   const constraints = { audio: true };
-  expect(await navigator.mediaDevices.getUserMedia(constraints)).toBe("real-microphone");
-  expect(original).toHaveBeenCalledWith(constraints);
-  expect(original.mock.contexts[0]).toBe(navigator.mediaDevices);
+  assert.equal(await navigator.mediaDevices.getUserMedia(constraints), "real-microphone");
+  assert.deepEqual(original.mock.calls[0].arguments, [constraints]);
+  assert.equal(original.mock.calls[0].this, navigator.mediaDevices);
 });
 
 test("repeated injection does not wrap the microphone or observe twice", () => {
   const { navigator, environment, observe, source } = install();
   const wrapped = navigator.mediaDevices.getUserMedia;
   vm.runInNewContext(source, environment);
-  expect(navigator.mediaDevices.getUserMedia).toBe(wrapped);
-  expect(observe).toHaveBeenCalledTimes(1);
+  assert.equal(navigator.mediaDevices.getUserMedia, wrapped);
+  assert.equal(observe.mock.callCount(), 1);
 });
 
 test("manifest targets only WhatsApp without privileged permissions or a worker", () => {
-  const manifest = JSON.parse(readFileSync(join(__dirname, "manifest.json"), "utf8"));
-  expect(manifest.content_scripts[0].matches).toEqual(["https://web.whatsapp.com/*"]);
-  expect(manifest.content_scripts[0].world).toBe("MAIN");
-  expect(manifest.permissions).toBeUndefined();
-  expect(manifest.background).toBeUndefined();
+  const manifest = JSON.parse(readFileSync(join(__dirname, "dist/manifest.json"), "utf8"));
+  assert.deepEqual(manifest.content_scripts[0].matches, ["https://web.whatsapp.com/*"]);
+  assert.equal(manifest.content_scripts[0].world, "MAIN");
+  assert.equal(manifest.permissions, undefined);
+  assert.equal(manifest.background, undefined);
+});
+
+test("built package contains all assets referenced by the manifest", () => {
+  const manifest = JSON.parse(readFileSync(join(__dirname, "dist/manifest.json"), "utf8"));
+  const script = manifest.content_scripts[0];
+  for (const asset of [...script.js, ...script.css, ...Object.values(manifest.icons)]) {
+    assert.ok(readFileSync(join(__dirname, "dist", asset)).length > 0, asset);
+  }
 });

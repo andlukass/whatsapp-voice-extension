@@ -1,0 +1,16 @@
+{
+  "name": "whatsapp-voice-extension",
+  "version": "1.0.3",
+  "private": true,
+  "scripts": {
+    "build": "tsc && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test content.test.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
